@@ -251,7 +251,9 @@ public final class FitText {
         // Vision's size before rounding: the smaller of the width and height ratios (FPMILayout.scaleFont).
         float size = (float) Math.max(MIN_FONT, Math.min(state.ratioX * bw, state.ratioY * bh));
         Insets in = c.getInsets();
-        int room = h - in.top - in.bottom;
+        // A button's text is centered and may run over its padding (Vision's own size does), so only keep it
+        // inside the button itself; fields and labels keep their text inside their insets.
+        int room = c instanceof AbstractButton ? h - 2 : h - in.top - in.bottom;
         int widthRoom = w - in.left - in.right - iconWidth(c);
         Font base = c.getFont();
         while (size > MIN_FONT && !fits(c, base.deriveFont(size), text, room, widthRoom)) {
