@@ -31,19 +31,21 @@ After Vision lays a window out, each text field, label and button drawn below 97
 - **Text fields:** a 1 px line border whose padding shrinks with the box, in place of the fixed 8 px.
 - **Fields, labels and buttons with plain text:** the exact (fractional) font size, shrunk in quarter-point steps until the text fits the height and width it has. HTML text is left alone (it wraps instead of ending in "...").
 
+It also lowers the client's minimum size. Vision doesn't lay its screens out smaller than the project's Minimum Size (Project Properties → Vision → User Interface, 800x600 by default): below that it adds scroll bars and part of the screen is out of view. The module lowers that limit to 100x100 in each running client, so the whole screen stays in view and keeps shrinking. The project's setting isn't changed.
+
 Components back at (nearly) their design size get Vision's own border and font back. Nothing is saved to the project, and uninstalling the module puts everything back in open clients right away.
 
 Vision re-applies its own rounded font on every layout pass whenever the rounded size differs from the component's current one. So the module also writes its size into the component's layout font ratios: Vision's next pass arrives at the same size and leaves the font alone, instead of the two undoing each other. If anything else keeps changing a component back (more than 5 times a second), the module leaves that component alone for 5 seconds.
 
 ## What it doesn't fix
 
-- **Scroll bars below the minimum size:** Vision doesn't shrink a client below its Minimum Size (Project Properties → Vision → User Interface, 800x600 by default). Below that it adds scroll bars and part of the screen is out of view. Lower it in the project if screens should keep shrinking.
-- **Docked windows** keep their pixel size.
+- **Docked windows** (a title bar or menu docked at the edge) keep their pixel size, so in a small window they take most of the space.
+- **Anchored components** keep their pixel size too: a header bar or tab strip anchored to an edge stays its full height. Below about 800x600 (where Vision used to add scroll bars) they can overlap the shrinking parts of the screen.
 - **Proportions:** Vision keeps a screen's proportions, so in a tall, narrow window the screen comes out small with blank space above and below.
 - **Tables** (alarm status table rows and headers) and images keep their size.
 - **Trade-off:** labels that Vision ended with "..." now show their whole text, but smaller.
 
-For the first two, Java can zoom the whole client evenly, docked windows included: `-Dsun.java2d.uiScale=0.5` makes Java report the screen twice as large, so Vision lays screens out at full size and Java draws them at half size. It works together with this module. In our tests (Vision Client Launcher 1.1.35) the launcher's JVM arguments reached only the launcher itself, not the client it starts; setting `JAVA_TOOL_OPTIONS=-Dsun.java2d.uiScale=0.5` before starting the launcher did reach the client.
+For docked windows and anchored components, Java can zoom the whole client evenly, docked windows included: `-Dsun.java2d.uiScale=0.5` makes Java report the screen twice as large, so Vision lays screens out at full size and Java draws them at half size. It works together with this module. In our tests (Vision Client Launcher 1.1.35) the launcher's JVM arguments reached only the launcher itself, not the client it starts; setting `JAVA_TOOL_OPTIONS=-Dsun.java2d.uiScale=0.5` before starting the launcher did reach the client.
 
 ## Requirements
 
@@ -57,9 +59,12 @@ For the first two, Java can zoom the whole client evenly, docked windows include
 
 An unsigned build needs `wrapper.java.additional.N=-Dignition.allowunsignedmodules=true` (the next free `N`) in `ignition.conf` and a Gateway restart.
 
-## Turning it off on one PC
+## Settings on one PC
 
-Start that client with `-Dvisionscaling.disabled=true`, for example by setting `JAVA_TOOL_OPTIONS=-Dvisionscaling.disabled=true` before starting the Vision Client Launcher. Useful for comparing a client with and without the module side by side.
+Java system properties for the client, for example set through `JAVA_TOOL_OPTIONS` before starting the Vision Client Launcher:
+
+- `-Dvisionscaling.disabled=true` turns the module off in that client. Useful for comparing a client with and without it side by side.
+- `-Dvisionscaling.minSize=640x480` sets the client's minimum size (100x100 by default); `-Dvisionscaling.minSize=off` keeps the project's Minimum Size and its scroll bars.
 
 ## Building
 

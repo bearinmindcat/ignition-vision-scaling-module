@@ -9,6 +9,7 @@ import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Insets;
 import java.awt.Toolkit;
+import java.awt.Window;
 import java.awt.event.AWTEventListener;
 import java.awt.event.ComponentEvent;
 import java.awt.geom.Rectangle2D;
@@ -104,15 +105,27 @@ public final class FitText {
         listener = event -> {
             try {
                 int id = event.getID();
-                if ((id == ComponentEvent.COMPONENT_RESIZED || id == ComponentEvent.COMPONENT_SHOWN)
-                        && event.getSource() instanceof JComponent) {
-                    queue((JComponent) event.getSource());
+                if (id == ComponentEvent.COMPONENT_RESIZED || id == ComponentEvent.COMPONENT_SHOWN) {
+                    Object source = event.getSource();
+                    if (source instanceof Window) {
+                        // The desktop stops getting resize events once it's at its minimum, but its window doesn't.
+                        MinimumSize.scan((Window) source);
+                    } else if (source instanceof JComponent) {
+                        queue((JComponent) source);
+                    }
                 }
             } catch (Throwable t) {
                 LOG.debug("Event handling failed", t);
             }
         };
         Toolkit.getDefaultToolkit().addAWTEventListener(listener, AWTEvent.COMPONENT_EVENT_MASK);
+        SwingUtilities.invokeLater(() -> {
+            try {
+                MinimumSize.scanAll();
+            } catch (Throwable t) {
+                LOG.debug("Could not lower the minimum size", t);
+            }
+        });
         LOG.info("Vision Scaling Fix installed.");
     }
 
@@ -317,6 +330,7 @@ public final class FitText {
                 c.revalidate();
             }
             states.clear();
+            MinimumSize.restoreAll();
         } finally {
             applying = false;
         }
