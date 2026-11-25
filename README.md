@@ -7,9 +7,25 @@
 
 Keeps numbers and labels readable when a Vision client window is smaller than its screens were designed for: half the screen (side by side or top and bottom), a quarter, a phone over Remote Desktop, or a PC at 125 % display scaling.
 
-Without it, value boxes cut their numbers off: only a thin slice through the middle of the digits shows, so they read as dots and dashes, and labels end in "..." even when there is room. With it, the same boxes show the whole number, a little smaller. At full size nothing changes.
+Without it, value boxes cut their numbers off: only a thin slice through the middle of the digits shows, so they read as dots and dashes, and labels end in "..." even when there is room. Below 800x600 the client also stops shrinking and adds scroll bars. With it, the same boxes show the whole number, a little smaller, and the whole screen stays in view. At full size nothing changes.
+
+<p align="center">
+  <img src="docs/demo.gif" alt="The same dashboard card in two Vision clients while their windows shrink from full screen to 560 x 360 px: with the module off, the Wet Well Level, Flow and Pump 1 Speed values lose their top and bottom until only dashes are left; with it on they stay whole" width="100%">
+  <br>
+  <sub>Two Vision clients on Ignition 8.1.35 showing the same demo window while both shrink from full screen to 560 x 360 px. Left: module turned off. Right: module on. The card is enlarged so you can see the pixels.</sub>
+</p>
 
 Forum thread with the same problem: [Layout on numeric text field versus numeric label](https://forum.inductiveautomation.com/t/layout-on-numeric-text-field-versus-numeric-label/80923). The workarounds there (taller fields, or turning Scale Font off and adding a resize script to every field) mean editing every component; this module does it for every window, with nothing to change in the project.
+
+## Before and after
+
+The demo window (a made-up plant dashboard designed at 1920 x 1080, with value boxes 26 px tall) in two clients side by side. Click a picture for full size.
+
+<img src="docs/half.png" alt="Half the screen: with the module off, the value boxes show only fragments of the digits and the screen scrolls sideways; with it on, every value is whole and the whole dashboard fits" width="100%">
+
+<img src="docs/quarter.png" alt="A quarter of the screen: with the module off, the values are chopped and only part of the dashboard shows behind scroll bars; with it on, the whole dashboard fits with every value whole" width="100%">
+
+<img src="docs/closeup.png" alt="The first card enlarged at half and at a quarter of the screen: off, the boxes show 9.62, 4.318 and 61.5 cut down to dashes; on, they read 9.62, 4.318 and 61.5" width="100%">
 
 ## Why Vision cuts things off
 
