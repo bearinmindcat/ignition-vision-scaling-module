@@ -67,6 +67,8 @@ public final class FitText {
     private static final float MIN_FONT = 2f;
     private static final float STEP = 0.25f;
     private static final Color LINE = new Color(0xB4, 0xB9, 0xBE);
+    /** Text drawn smaller than this (points) gets a tooltip showing it at a readable size ("Read tiny text"). */
+    private static final float TINY = 7f;
 
     private static AWTEventListener listener;
     private static final KeyEventDispatcher HOTKEY = e -> {
@@ -96,6 +98,7 @@ public final class FitText {
         final float ratioY;
         Border border;           // the border Vision gave a text field, while ours replaces it
         Insets margin;           // a button's own margin, while a scaled one replaces it
+        boolean tip;             // the tooltip is ours ("Read tiny text")
         String key;              // width, height, text and font size last fitted
         String size;             // width, height and text of the last fit (loop breaker)
         long windowStart;        // loop breaker: same-size refits counted per second
@@ -128,9 +131,8 @@ public final class FitText {
                         // The desktop stops getting resize events once it's at its minimum, but its window doesn't.
                         MinimumSize.scan((Window) source);
                     } else if (source instanceof JComponent) {
-                        if (source instanceof FPMIWindow && id == ComponentEvent.COMPONENT_SHOWN) {
-                            VisionDesktop desktop = (VisionDesktop) SwingUtilities.getAncestorOfClass(VisionDesktop.class, (FPMIWindow) source);
-                            SwingUtilities.invokeLater(() -> ClientScale.update(desktop));
+                        if (source instanceof FPMIWindow) {
+                            ClientScale.schedule((VisionDesktop) SwingUtilities.getAncestorOfClass(VisionDesktop.class, (FPMIWindow) source));
                         }
                         queue((JComponent) source);
                     }
@@ -306,6 +308,20 @@ public final class FitText {
                 c.setBorder(ours);
             }
         }
+        if (c instanceof AbstractButton && (state.border != null || c.getBorder() != null)) {
+            // Ignition's look and feel keeps 6 px of button border on every side at any size; a 21 px button has
+            // 9 px left for its text. Paint the same border, but with insets that shrink with the button.
+            if (state.border == null) {
+                state.border = c.getBorder();
+            }
+            double sc = Math.min(1, bh / designHeight);
+            Insets oi = state.border.getBorderInsets(c);
+            Insets si = new Insets(Math.max(1, (int) Math.round(oi.top * sc)), Math.max(1, (int) Math.round(oi.left * sc)),
+                    Math.max(1, (int) Math.round(oi.bottom * sc)), Math.max(1, (int) Math.round(oi.right * sc)));
+            if (!(c.getBorder() instanceof ScaledBorder && ((ScaledBorder) c.getBorder()).insets.equals(si))) {
+                c.setBorder(new ScaledBorder(state.border, si));
+            }
+        }
         if (c instanceof AbstractButton) {
             AbstractButton b = (AbstractButton) c;
             if (state.margin == null) {
@@ -339,6 +355,7 @@ public final class FitText {
             size -= 0.03f;
         }
         Debug.log("fit %s '%s' %dx%d insets %s room %d widthRoom %d size %.2f", c.getClass().getSimpleName(), text, w, h, in, room, widthRoom, size);
+        tooltip(c, state, size < TINY && Settings.on(Settings.Fix.HOVER) ? text : null);
         // Vision's next layout pass then computes the same (rounded) size and keeps this font.
         lc.setFontRatioX((float) (size / bw));
         lc.setFontRatioY((float) (size / bh));
@@ -359,8 +376,61 @@ public final class FitText {
             ((AbstractButton) c).setMargin(state.margin);
             state.margin = null;
         }
-        // Vision's next layout pass sets its own rounded font from the restored ratios.
+        tooltip(c, state, null);
+        // Vision's own font for this size (what FPMILayout.scaleFont computes from the restored ratios): set it here,
+        // since a layout pass that doesn't change the component's bounds may not reapply it (popups grown back).
+        Rectangle2D b = FPMILayout.getBounds(c);
+        if (b != null && b.getWidth() > 0 && b.getHeight() > 0 && c.getFont() != null) {
+            int size = Math.max(2, Math.min(Math.round(state.ratioX * (float) b.getWidth()), Math.round(state.ratioY * (float) b.getHeight())));
+            if (Math.abs(c.getFont().getSize2D() - size) > 0.01f) {
+                c.setFont(c.getFont().deriveFont((float) size));
+            }
+        }
         c.revalidate();
+    }
+
+    /** Shows the text in a large tooltip (or removes ours); a component's own tooltip is never replaced. */
+    private static void tooltip(JComponent c, State state, String text) {
+        if (text != null && !text.trim().isEmpty()) {
+            if (!state.tip && c.getToolTipText() != null) {
+                return;
+            }
+            String html = "<html><div style='font-size:15px; font-weight:bold; padding:2px'>"
+                    + text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") + "</div></html>";
+            if (!html.equals(c.getToolTipText())) {
+                c.setToolTipText(html);
+            }
+            state.tip = true;
+        } else if (state.tip) {
+            c.setToolTipText(null);
+            state.tip = false;
+        }
+    }
+
+    /** A border that paints like the look and feel's own but reports smaller insets (more room for the text). */
+    static final class ScaledBorder implements Border {
+        final Border inner;
+        final Insets insets;
+
+        ScaledBorder(Border inner, Insets insets) {
+            this.inner = inner;
+            this.insets = insets;
+        }
+
+        @Override
+        public void paintBorder(java.awt.Component c, java.awt.Graphics g, int x, int y, int w, int h) {
+            inner.paintBorder(c, g, x, y, w, h);
+        }
+
+        @Override
+        public Insets getBorderInsets(java.awt.Component c) {
+            return (Insets) insets.clone();
+        }
+
+        @Override
+        public boolean isBorderOpaque() {
+            return inner.isBorderOpaque();
+        }
     }
 
     private static boolean fits(JComponent c, Font font, String text, int room, int widthRoom) {

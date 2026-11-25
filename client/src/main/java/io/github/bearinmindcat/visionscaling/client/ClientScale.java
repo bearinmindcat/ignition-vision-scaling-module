@@ -38,6 +38,11 @@ final class ClientScale {
 
     private static final Logger LOG = LoggerFactory.getLogger("VisionScalingFix");
     static final double FULL = 0.97;
+    /** A container's aspect-ratio flags: what Vision does with a window of another shape. */
+    private static final int AR_MASK = FPMILayout.AR_LEADING | FPMILayout.AR_TRAILING | FPMILayout.AR_OFF;
+    /** Popup -> its own size, and the size this module gave it. */
+    private static final Map<FPMIWindow, Dimension> popupSize = new WeakHashMap<>();
+    private static final Map<FPMIWindow, Dimension> popupApplied = new WeakHashMap<>();
     private static final int ANCHORS = FPMILayout.ANCHOR_N | FPMILayout.ANCHOR_S | FPMILayout.ANCHOR_E
             | FPMILayout.ANCHOR_W | FPMILayout.CENTER_X | FPMILayout.CENTER_Y;
 
@@ -62,7 +67,8 @@ final class ClientScale {
 
         /** Back to the anchored layout, with the font it had (Vision doesn't rescale fonts without ratios). */
         void restore(JComponent c, FPMI_LC lc) {
-            lc.setFlags(flags);
+            int now = lc.getFlags() == null ? 0 : lc.getFlags();
+            lc.setFlags((flags & ~AR_MASK) | (now & AR_MASK));
             lc.setFontRatioX(ratioX);
             lc.setFontRatioY(ratioY);
             if (font != null && (ratioX == null || ratioY == null)) {
@@ -97,6 +103,18 @@ final class ClientScale {
         return Math.min(1, Math.min(visible.width / fullW, visible.height / fullH));
     }
 
+    private static final java.util.Set<VisionDesktop> scheduled = java.util.Collections.newSetFromMap(new WeakHashMap<>());
+
+    /** Updates a desktop after the current layout pass, once however many events ask for it. */
+    static void schedule(VisionDesktop desktop) {
+        if (desktop != null && scheduled.add(desktop)) {
+            SwingUtilities.invokeLater(() -> {
+                scheduled.remove(desktop);
+                update(desktop);
+            });
+        }
+    }
+
     static void update(VisionDesktop desktop) {
         if (busy || desktop == null) {
             return;
@@ -107,6 +125,8 @@ final class ClientScale {
             boolean small = s < FULL;
             boolean docks = small && Settings.on(Settings.Fix.DOCKS);
             boolean anchored = small && Settings.on(Settings.Fix.ANCHORED);
+            boolean popups = small && Settings.on(Settings.Fix.POPUPS);
+            Rectangle area = freeArea(desktop);
             boolean changed = false;
             for (JInternalFrame f : desktop.getAllFrames()) {
                 if (!(f instanceof FPMIWindow)) {
@@ -115,6 +135,7 @@ final class ClientScale {
                 FPMIWindow win = (FPMIWindow) f;
                 changed |= dock(win, docks ? s : 1);
                 changed |= anchors(win, anchored);
+                changed |= popup(win, area, popups);
                 if (win.getRootContainer() != null) {
                     walk(win.getRootContainer(), c -> {
                         if (InnerParts.handles(c)) {
@@ -229,6 +250,66 @@ final class ClientScale {
         }
     }
 
+    /** The desktop area left for screens and popups: the maximized main window's bounds, else what is visible. */
+    private static Rectangle freeArea(VisionDesktop desktop) {
+        // What is visible of the desktop (Vision grows the desktop around a popup that doesn't fit, so the
+        // desktop and the main window can be larger than the client window).
+        JScrollPane sp = (JScrollPane) SwingUtilities.getAncestorOfClass(JScrollPane.class, desktop);
+        Rectangle view = sp != null ? sp.getViewport().getViewRect() : new Rectangle(desktop.getSize());
+        for (JInternalFrame f : desktop.getAllFrames()) {
+            if (f instanceof FPMIWindow && f.isVisible() && ((FPMIWindow) f).getDockPosition() != FPMIWindow.DOCK_FLOAT) {
+                // Leave out the docked windows.
+                Rectangle d = f.getBounds();
+                switch (((FPMIWindow) f).getDockPosition()) {
+                    case FPMIWindow.DOCK_NORTH: { int top = Math.max(view.y, d.y + d.height); view.height -= top - view.y; view.y = top; break; }
+                    case FPMIWindow.DOCK_SOUTH: view.height = Math.min(view.height, d.y - view.y); break;
+                    case FPMIWindow.DOCK_WEST: { int left = Math.max(view.x, d.x + d.width); view.width -= left - view.x; view.x = left; break; }
+                    case FPMIWindow.DOCK_EAST: view.width = Math.min(view.width, d.x - view.x); break;
+                    default: break;
+                }
+            }
+        }
+        return view;
+    }
+
+    /** Popups: a floating window bigger than the free area shrinks to fit it (centered), and gets its size back. */
+    private static boolean popup(FPMIWindow win, Rectangle area, boolean on) {
+        if (win.getDockPosition() != FPMIWindow.DOCK_FLOAT || win.isMaximum() || !win.isVisible()) {
+            return false;
+        }
+        Dimension now = win.getSize();
+        if (now.width <= 0 || now.height <= 0) {
+            return false;   // not sized by Vision yet; it is fitted on its next resize
+        }
+        Dimension applied = popupApplied.get(win);
+        if (applied != null && !applied.equals(now)) {
+            popupApplied.remove(win);      // resized since (by the user or the project): that is its size now
+            popupSize.put(win, now);
+            applied = null;
+        }
+        Dimension own = popupSize.computeIfAbsent(win, w -> new Dimension(now));
+        if (own.width <= 0 || own.height <= 0 || area.width <= 0 || area.height <= 0) {
+            return false;
+        }
+        double fit = Math.min(1, Math.min(area.width / (double) own.width, area.height / (double) own.height));
+        if (on && fit < 0.99) {
+            Dimension target = new Dimension(Math.max(60, (int) Math.floor(own.width * fit)), Math.max(40, (int) Math.floor(own.height * fit)));
+            if (target.equals(now)) {
+                return false;
+            }
+            win.setSize(target);
+            win.setLocation(area.x + Math.max(0, (area.width - target.width) / 2), area.y + Math.max(0, (area.height - target.height) / 2));
+            popupApplied.put(win, target);
+            return true;
+        }
+        if (applied != null) {
+            popupApplied.remove(win);
+            win.setSize(own);
+            return true;
+        }
+        return false;
+    }
+
     /** Back to Vision's own layout everywhere (module removed). */
     static void restoreAll() {
         for (FPMIWindow win : new ArrayList<>(designThickness.keySet())) {
@@ -243,5 +324,13 @@ final class ClientScale {
         }
         saved.clear();
         designThickness.clear();
+        for (Map.Entry<FPMIWindow, Dimension> e : new ArrayList<>(popupApplied.entrySet())) {
+            Dimension own = popupSize.get(e.getKey());
+            if (own != null && e.getValue().equals(e.getKey().getSize())) {
+                e.getKey().setSize(own);
+            }
+        }
+        popupApplied.clear();
+        popupSize.clear();
     }
 }

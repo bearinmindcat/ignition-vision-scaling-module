@@ -44,6 +44,7 @@ final class InnerParts {
         final Float ratioY;
         Dataset applied;          // the tab data as the strip holds it after we set it (Vision copies it)
         double scale = 1;
+        int width = -1;           // the strip width the labels were fitted to
 
         TabState(PMITabStrip t) {
             original = t.getTabData();
@@ -133,9 +134,10 @@ final class InnerParts {
             }
             tabs.put(t, st);
         }
-        if (Math.abs(st.scale - s) < 0.01) {
-            return;
+        if (Math.abs(st.scale - s) < 0.01 && st.width == t.getWidth()) {
+            return;   // same scale and width: nothing to refit (a narrower strip needs smaller labels)
         }
+        st.width = t.getWidth();
         double fontScale = s;
         if (t.getOrientation() == PMITabStrip.ORIENTATION_LEFT || t.getOrientation() == PMITabStrip.ORIENTATION_RIGHT) {
             // A side strip is as wide as its window: shrink the labels further until the widest one fits.

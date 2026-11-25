@@ -38,7 +38,7 @@ final class MinimumSize {
             VisionDesktop desktop = (VisionDesktop) c;
             apply(desktop);
             // After Vision's own layout for the new size.
-            SwingUtilities.invokeLater(() -> ClientScale.update(desktop));
+            ClientScale.schedule(desktop);
         } else if (c instanceof Container) {
             for (Component child : ((Container) c).getComponents()) {
                 scan(child);
@@ -69,7 +69,7 @@ final class MinimumSize {
             }
             return;
         }
-        Dimension want = Settings.minSize();
+        Dimension want = Settings.minSize(desktop.getGraphicsConfiguration());
         if (want.equals(current)) {
             return;
         }

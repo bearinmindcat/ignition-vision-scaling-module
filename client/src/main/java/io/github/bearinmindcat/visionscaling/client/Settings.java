@@ -1,6 +1,11 @@
 package io.github.bearinmindcat.visionscaling.client;
 
 import java.awt.Dimension;
+import java.awt.GraphicsConfiguration;
+import java.awt.GraphicsEnvironment;
+import java.awt.Insets;
+import java.awt.Rectangle;
+import java.awt.Toolkit;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.prefs.Preferences;
@@ -9,31 +14,53 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Which fixes are on, per Windows user (Java preferences). A Java system property on the client
- * ({@code -Dvisionscaling.<key>=true|false}, e.g. through {@code JAVA_TOOL_OPTIONS}) overrides the saved choice and
- * locks it in the settings window, for a PC an administrator sets up.
+ * ({@code -Dvisionscaling.<key>=...}, e.g. through {@code JAVA_TOOL_OPTIONS}) overrides the saved choice and locks it
+ * in the settings window, for a PC an administrator sets up.
  */
 final class Settings {
 
     private static final Logger LOG = LoggerFactory.getLogger("VisionScalingFix");
-    static final String DEFAULT_MIN_SIZE = "100x100";
 
     enum Fix {
-        FIELDS("fields", "Value boxes (thin border and text that fits)", true),
-        LABELS("labels", "Labels (text that fits instead of \"...\")", true),
-        BUTTONS("buttons", "Buttons (text that fits)", true),
-        PARTS("parts", "Tables and tab strips (rows, headers and tabs shrink with them)", true),
-        NO_SCROLLBARS("noScrollBars", "No scroll bars (keep shrinking below the project's minimum size)", true),
-        DOCKS("docks", "Docked windows (title bars and menus shrink with the window)", true),
-        ANCHORED("anchored", "Anchored parts (header bars and tab strips shrink with the screen)", true);
+        ENABLED("enabled", "Turn on Vision Scaling Fix", ""),
+        FIELDS("fields", "Value boxes", "numbers fit inside the box"),
+        LABELS("labels", "Labels", "text fits, no more \"...\""),
+        BUTTONS("buttons", "Buttons", "text fits on the button"),
+        PARTS("parts", "Tables and tabs", "rows, headers and menu tabs shrink too"),
+        HOVER("hover", "Read tiny text", "point at it to see it at normal size"),
+        DOCKS("docks", "Title bar and menus", "shrink with the window"),
+        ANCHORED("anchored", "Header bars and bottom tabs", "shrink with the screen"),
+        POPUPS("popups", "Popups", "shrink to fit the window"),
+        NO_SCROLLBARS("noScrollBars", "", "");   // shown as the "Smallest size" choice
 
         final String key;
         final String label;
-        final boolean shownByDefault;
+        final String hint;
 
-        Fix(String key, String label, boolean on) {
+        Fix(String key, String label, String hint) {
             this.key = key;
             this.label = label;
-            this.shownByDefault = on;
+            this.hint = hint;
+        }
+    }
+
+    /** How small the client may get before it scrolls. */
+    enum Limit {
+        ANY("Any size", "100x100"),
+        HALF("Half the screen", "half"),
+        PROJECT("The project's minimum (scroll bars)", null);
+
+        final String label;
+        final String minSize;
+
+        Limit(String label, String minSize) {
+            this.label = label;
+            this.minSize = minSize;
+        }
+
+        @Override
+        public String toString() {
+            return label;
         }
     }
 
@@ -59,15 +86,24 @@ final class Settings {
         return override(fix) != null;
     }
 
+    /** Whether a fix is on (every fix is off while "Turn on Vision Scaling Fix" is off). */
     static boolean on(Fix fix) {
+        if (fix != Fix.ENABLED && !saved(Fix.ENABLED)) {
+            return false;
+        }
+        return saved(fix);
+    }
+
+    /** The check box's own state, whatever the master switch says. */
+    static boolean saved(Fix fix) {
         String v = override(fix);
         if (v != null) {
             return Boolean.parseBoolean(v.trim());
         }
         try {
-            return prefs().getBoolean(fix.key, fix.shownByDefault);
+            return prefs().getBoolean(fix.key, true);
         } catch (RuntimeException e) {
-            return fix.shownByDefault;
+            return true;
         }
     }
 
@@ -92,38 +128,54 @@ final class Settings {
         changed();
     }
 
-    static boolean minSizeLocked() {
-        String v = System.getProperty("visionscaling.minSize");
-        return v != null && !v.trim().equalsIgnoreCase("off");
+    // Smallest size ------------------------------------------------------------------------------------------------
+
+    static boolean limitLocked() {
+        return locked(Fix.NO_SCROLLBARS) || System.getProperty("visionscaling.minSize") != null;
     }
 
-    static String minSizeText() {
-        if (minSizeLocked()) {
-            return System.getProperty("visionscaling.minSize").trim();
+    static Limit limit() {
+        if (!saved(Fix.NO_SCROLLBARS)) {
+            return Limit.PROJECT;
         }
-        try {
-            return prefs().get("minSize", DEFAULT_MIN_SIZE);
-        } catch (RuntimeException e) {
-            return DEFAULT_MIN_SIZE;
-        }
+        return "half".equalsIgnoreCase(minSizeText()) ? Limit.HALF : Limit.ANY;
     }
 
-    static void setMinSizeText(String text) {
-        if (parse(text) == null) {
-            return;
-        }
+    static void setLimit(Limit limit) {
         try {
-            prefs().put("minSize", text.trim().toLowerCase());
+            prefs().putBoolean(Fix.NO_SCROLLBARS.key, limit != Limit.PROJECT);
+            if (limit.minSize != null) {
+                prefs().put("minSize", limit.minSize);
+            }
         } catch (RuntimeException e) {
-            LOG.warn("Could not save the minimum size", e);
+            LOG.warn("Could not save the smallest size", e);
         }
         changed();
     }
 
-    /** The client minimum size to use when "No scroll bars" is on. */
-    static Dimension minSize() {
-        Dimension d = parse(minSizeText());
-        return d != null ? d : parse(DEFAULT_MIN_SIZE);
+    static String minSizeText() {
+        String v = System.getProperty("visionscaling.minSize");
+        if (v != null && !v.trim().equalsIgnoreCase("off")) {
+            return v.trim();
+        }
+        try {
+            return prefs().get("minSize", Limit.ANY.minSize);
+        } catch (RuntimeException e) {
+            return Limit.ANY.minSize;
+        }
+    }
+
+    /** The client minimum size on a screen when scroll bars are off: a size, or half the screen's work area. */
+    static Dimension minSize(GraphicsConfiguration gc) {
+        String text = minSizeText();
+        if ("half".equalsIgnoreCase(text)) {
+            Rectangle screen = gc != null ? gc.getBounds()
+                    : GraphicsEnvironment.getLocalGraphicsEnvironment().getMaximumWindowBounds();
+            Insets si = gc != null ? Toolkit.getDefaultToolkit().getScreenInsets(gc) : new Insets(0, 0, 0, 0);
+            return new Dimension((screen.width - si.left - si.right) / 2, (screen.height - si.top - si.bottom) / 2);
+        }
+        Dimension d = parse(text);
+        return d != null ? d : new Dimension(100, 100);
     }
 
     static Dimension parse(String text) {
