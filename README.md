@@ -7,7 +7,7 @@
 
 Keeps numbers and labels readable when a Vision client window is smaller than its screens were designed for: half the screen (side by side or top and bottom), a quarter, a phone over Remote Desktop, or a PC at 125 % display scaling.
 
-Without it, value boxes cut their numbers off: only a thin slice through the middle of the digits shows, so they read as dots and dashes, and labels end in "..." even when there is room. Below 800x600 the client also stops shrinking and adds scroll bars. With it, the same boxes show the whole number, a little smaller, and the whole screen stays in view. At full size nothing changes.
+Without it, value boxes cut their numbers off: only a thin slice through the middle of the digits shows, so they read as dots and dashes, and labels end in "..." even when there is room. Below 800x600 the client also stops shrinking and adds scroll bars, and docked title bars and menus keep their full size. With it, the same boxes show the whole number, a little smaller, and the whole client shrinks evenly, like a picture. At full size nothing changes.
 
 <p align="center">
   <img src="docs/demo.gif" alt="The same dashboard card in two Vision clients while their windows shrink from full screen to 560 x 360 px: with the module off, the Wet Well Level, Flow and Pump 1 Speed values lose their top and bottom until only dashes are left; with it on they stay whole" width="100%">
@@ -42,26 +42,33 @@ Smaller causes:
 
 ## What it does
 
-After Vision lays a window out, each text field, label and button drawn below 97 % of its design height gets:
+Each fix has its own check box in the settings window (**Ctrl+Period** in a client), all on by default.
 
-- **Text fields:** a 1 px line border whose padding shrinks with the box, in place of the fixed 8 px.
-- **Fields, labels and buttons with plain text:** the exact (fractional) font size, shrunk in quarter-point steps until the text fits the height and width it has. HTML text is left alone (it wraps instead of ending in "...").
+**Text in small windows.** After Vision lays a window out, each component drawn below 97 % of its design height gets:
 
-It also lowers the client's minimum size. Vision doesn't lay its screens out smaller than the project's Minimum Size (Project Properties → Vision → User Interface, 800x600 by default): below that it adds scroll bars and part of the screen is out of view. The module lowers that limit to 100x100 in each running client, so the whole screen stays in view and keeps shrinking. The project's setting isn't changed.
+- **Value boxes:** a 1 px line border whose padding shrinks with the box, in place of the fixed 8 px, and text that fits.
+- **Labels and buttons:** the exact (fractional) font size, shrunk in quarter-point steps until the text fits the height and width it has, instead of ending in "...". A button's margin shrinks with it. HTML text is left alone (it wraps instead).
+- **Tables and tab strips:** an alarm status table's rows, header and Acknowledge/Shelve buttons, and a tab strip's tab fonts, padding and spacing, shrink with the component. Vision's own layout leaves these at full size.
 
-Components back at (nearly) their design size get Vision's own border and font back. Nothing is saved to the project, and uninstalling the module puts everything back in open clients right away.
+**Layout in small windows.** While the client is smaller than its screen's full size, it shrinks as one picture:
 
-Vision re-applies its own rounded font on every layout pass whenever the rounded size differs from the component's current one. So the module also writes its size into the component's layout font ratios: Vision's next pass arrives at the same size and leaves the font alone, instead of the two undoing each other. If anything else keeps changing a component back (more than 5 times a second), the module leaves that component alone for 5 seconds.
+- **No scroll bars:** Vision doesn't lay its screens out smaller than the project's Minimum Size (Project Properties → Vision → User Interface, 800x600 by default), and adds scroll bars below that. The module lowers that limit (100x100 by default, adjustable in the settings window) so the whole screen stays in view.
+- **Docked windows:** a title bar or menu docked at an edge keeps its pixel size in Vision, so in a small window it takes most of the space. The module scales each docked window's thickness by how much smaller than full screen the client is. Vision's dock layout uses each docked window's current width or height.
+- **Anchored parts:** components anchored to an edge (a header bar, a bottom tab strip) keep their pixel size in Vision and overlap the shrinking rest. The module lays them out as relative components (their layout flags) while the client is small.
+
+A maximized client is never changed by the layout fixes, and components back at (nearly) their design size get Vision's own border, font and layout back. Nothing is saved to the project, and uninstalling the module puts everything back in open clients right away.
+
+<img src="docs/settings.png" alt="The Vision Scaling Fix Settings window: check boxes for value boxes, labels, buttons, tables and tab strips under Text in small windows, and no scroll bars (with the smallest client size, 100x100), docked windows and anchored parts under Layout in small windows" width="560">
+
+Vision re-applies its own rounded font on every layout pass whenever the rounded size differs from the component's current one. So the module also writes its size into the component's layout font ratios: Vision's next pass arrives at the same size and leaves the font alone, instead of the two undoing each other. If something keeps changing a component back at the same size (more than 5 times a second), the module leaves it alone for 5 seconds, then tries again.
 
 ## What it doesn't fix
 
-- **Docked windows** (a title bar or menu docked at the edge) keep their pixel size, so in a small window they take most of the space.
-- **Anchored components** keep their pixel size too: a header bar or tab strip anchored to an edge stays its full height. Below about 800x600 (where Vision used to add scroll bars) they can overlap the shrinking parts of the screen.
 - **Proportions:** Vision keeps a screen's proportions, so in a tall, narrow window the screen comes out small with blank space above and below.
-- **Tables** (alarm status table rows and headers) and images keep their size.
+- **Very small text:** at a quarter of the screen and below, text is whole but small. A button 20 px wide can't show readable text either way.
 - **Trade-off:** labels that Vision ended with "..." now show their whole text, but smaller.
 
-For docked windows and anchored components, Java can zoom the whole client evenly, docked windows included: `-Dsun.java2d.uiScale=0.5` makes Java report the screen twice as large, so Vision lays screens out at full size and Java draws them at half size. It works together with this module. In our tests (Vision Client Launcher 1.1.35) the launcher's JVM arguments reached only the launcher itself, not the client it starts; setting `JAVA_TOOL_OPTIONS=-Dsun.java2d.uiScale=0.5` before starting the launcher did reach the client.
+Java can also zoom the whole client evenly, on a PC that always runs it small: `-Dsun.java2d.uiScale=0.5` makes Java report the screen twice as large, so Vision lays screens out at full size and Java draws them at half size. It works together with this module. In our tests (Vision Client Launcher 1.1.35) the launcher's JVM arguments reached only the launcher itself, not the client it starts; setting `JAVA_TOOL_OPTIONS=-Dsun.java2d.uiScale=0.5` before starting the launcher did reach the client.
 
 ## Requirements
 
@@ -75,12 +82,24 @@ For docked windows and anchored components, Java can zoom the whole client evenl
 
 An unsigned build needs `wrapper.java.additional.N=-Dignition.allowunsignedmodules=true` (the next free `N`) in `ignition.conf` and a Gateway restart.
 
-## Settings on one PC
+## Settings
 
-Java system properties for the client, for example set through `JAVA_TOOL_OPTIONS` before starting the Vision Client Launcher:
+**Ctrl+Period** in a Vision client opens the settings window, and so does `system.visionscaling.openSettings()` (for example from a client menu item). Changes apply at once and are saved for the current Windows user.
 
-- `-Dvisionscaling.disabled=true` turns the module off in that client. Useful for comparing a client with and without it side by side.
-- `-Dvisionscaling.minSize=640x480` sets the client's minimum size (100x100 by default); `-Dvisionscaling.minSize=off` keeps the project's Minimum Size and its scroll bars.
+An administrator can set a fix for every user of one PC with a Java system property on the client, for example through `JAVA_TOOL_OPTIONS` before starting the Vision Client Launcher. A fix set this way is locked in the settings window.
+
+| Property | What it does |
+| --- | --- |
+| `-Dvisionscaling.disabled=true` | turns the whole module off in that client (useful for comparing with and without it) |
+| `-Dvisionscaling.fields=false` | value boxes |
+| `-Dvisionscaling.labels=false` | labels |
+| `-Dvisionscaling.buttons=false` | buttons |
+| `-Dvisionscaling.parts=false` | tables and tab strips |
+| `-Dvisionscaling.noScrollBars=false` | keeps the project's minimum size and its scroll bars (`-Dvisionscaling.minSize=off` too) |
+| `-Dvisionscaling.minSize=640x480` | the smallest client size when scroll bars are off (100x100 by default) |
+| `-Dvisionscaling.docks=false` | docked windows |
+| `-Dvisionscaling.anchored=false` | anchored parts |
+| `-Dvisionscaling.debug=true` | writes a trace to `visionscaling-debug.txt` in the temp folder |
 
 ## Building
 
