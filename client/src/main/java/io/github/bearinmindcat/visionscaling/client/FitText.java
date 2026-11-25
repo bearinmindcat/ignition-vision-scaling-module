@@ -365,8 +365,20 @@ public final class FitText {
 
     private static boolean fits(JComponent c, Font font, String text, int room, int widthRoom) {
         FontMetrics fm = c.getFontMetrics(font);
-        // One pixel of slack: digits don't reach the bottom of the line (descent).
-        if (fm.getAscent() + fm.getDescent() > room + 1) {
+        // Swing centers the line (ascent + descent) in the room, and digits and capitals only fill the middle of it:
+        // the tops of the digits stay inside while room >= 2 x digit height - ascent + descent, and the baseline
+        // while room >= ascent - descent. Requiring the whole line to fit shrank text that Vision draws whole.
+        int asc = fm.getAscent();
+        int desc = fm.getDescent();
+        double digit = font.createGlyphVector(fm.getFontRenderContext(), "0").getVisualBounds().getHeight();
+        double need = Math.max(asc - desc, 2 * digit - asc + desc);
+        if (c instanceof JTextField) {
+            // In a running client a value box doesn't place its line where the centered rule expects (tested at
+            // 125 % display scaling: a pixel cut off the tops or bottoms of the digits even with two pixels spare),
+            // so there the whole line must fit, with one pixel of slack.
+            need = asc + desc;
+        }
+        if (need > room + 1) {
             return false;
         }
         // One pixel to spare: Swing measures the text again with rounding and ends it in "..." when it doesn't fit.
