@@ -1,0 +1,12 @@
+.idea/
+*.iml
+.vscode/
+**/build/
+.gradle/
+local.properties
+
+# Signing material must never be committed.
+*.jks
+*.pfx
+*.p12
+*.p7b
