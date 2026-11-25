@@ -1,17 +1,22 @@
 package io.github.bearinmindcat.visionscaling.client;
 
 import com.inductiveautomation.factorypmi.application.FPMIWindow;
+import com.inductiveautomation.factorypmi.application.VisionDesktop;
 import com.inductiveautomation.factorypmi.application.components.util.FPMILayout;
 import com.inductiveautomation.factorypmi.application.components.util.FPMI_LC;
 import java.awt.AWTEvent;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.FontMetrics;
+import java.awt.Frame;
+import java.awt.KeyEventDispatcher;
+import java.awt.KeyboardFocusManager;
 import java.awt.Insets;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.AWTEventListener;
 import java.awt.event.ComponentEvent;
+import java.awt.event.KeyEvent;
 import java.awt.geom.Rectangle2D;
 import java.beans.PropertyChangeListener;
 import java.util.ArrayList;
@@ -64,6 +69,16 @@ public final class FitText {
     private static final Color LINE = new Color(0xB4, 0xB9, 0xBE);
 
     private static AWTEventListener listener;
+    private static final KeyEventDispatcher HOTKEY = e -> {
+        // Ctrl+Period opens the settings window.
+        if (e.getID() == KeyEvent.KEY_PRESSED && e.getKeyCode() == KeyEvent.VK_PERIOD && e.isControlDown()
+                && !e.isShiftDown() && !e.isAltDown() && !e.isMetaDown()) {
+            SettingsDialog.open();
+            return true;
+        }
+        return false;
+    };
+    private static final Runnable ON_CHANGE = () -> SwingUtilities.invokeLater(FitText::refresh);
     /** Per component: Vision's own font ratios, the border it had, and the last state fitted. */
     private static final Map<JComponent, State> states = new WeakHashMap<>();
     private static final Set<JComponent> pending = Collections.newSetFromMap(new WeakHashMap<>());
@@ -80,8 +95,10 @@ public final class FitText {
         final float ratioX;
         final float ratioY;
         Border border;           // the border Vision gave a text field, while ours replaces it
+        Insets margin;           // a button's own margin, while a scaled one replaces it
         String key;              // width, height, text and font size last fitted
-        long windowStart;        // loop breaker: fits counted per second
+        String size;             // width, height and text of the last fit (loop breaker)
+        long windowStart;        // loop breaker: same-size refits counted per second
         int fitsInWindow;
         long pausedUntil;
 
@@ -111,6 +128,10 @@ public final class FitText {
                         // The desktop stops getting resize events once it's at its minimum, but its window doesn't.
                         MinimumSize.scan((Window) source);
                     } else if (source instanceof JComponent) {
+                        if (source instanceof FPMIWindow && id == ComponentEvent.COMPONENT_SHOWN) {
+                            VisionDesktop desktop = (VisionDesktop) SwingUtilities.getAncestorOfClass(VisionDesktop.class, (FPMIWindow) source);
+                            SwingUtilities.invokeLater(() -> ClientScale.update(desktop));
+                        }
                         queue((JComponent) source);
                     }
                 }
@@ -119,6 +140,8 @@ public final class FitText {
             }
         };
         Toolkit.getDefaultToolkit().addAWTEventListener(listener, AWTEvent.COMPONENT_EVENT_MASK);
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(HOTKEY);
+        Settings.addListener(ON_CHANGE);
         SwingUtilities.invokeLater(() -> {
             try {
                 MinimumSize.scanAll();
@@ -134,12 +157,20 @@ public final class FitText {
             return;
         }
         Toolkit.getDefaultToolkit().removeAWTEventListener(listener);
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(HOTKEY);
+        Settings.removeListener(ON_CHANGE);
         listener = null;
         SwingUtilities.invokeLater(FitText::restoreAll);
         LOG.info("Vision Scaling Fix removed.");
     }
 
     /** Collects components and fits them once, after the layout pass that changed them (on the event thread). */
+    /** A component's Vision layout constraints, or null for parts Vision doesn't lay out (inside a table, ...). */
+    static FPMI_LC constraints(JComponent c) {
+        Object lc = c.getClientProperty(FPMILayout.LAYOUT_CONSTRAINTS);
+        return lc instanceof FPMI_LC ? (FPMI_LC) lc : null;
+    }
+
     private static void queue(JComponent c) {
         if (!SwingUtilities.isEventDispatchThread()) {
             SwingUtilities.invokeLater(() -> queue(c));
@@ -171,8 +202,17 @@ public final class FitText {
         if (w <= 0 || h <= 0 || c.getFont() == null) {
             return;
         }
+        if (InnerParts.handles(c)) {
+            InnerParts.fit(c);
+            return;
+        }
         boolean field = c instanceof JTextField;
         if (!field && !(c instanceof JLabel) && !(c instanceof AbstractButton)) {
+            return;
+        }
+        Settings.Fix kind = field ? Settings.Fix.FIELDS : c instanceof JLabel ? Settings.Fix.LABELS : Settings.Fix.BUTTONS;
+        if (!Settings.on(kind)) {
+            release(c);
             return;
         }
         String text = text(c);
@@ -182,7 +222,7 @@ public final class FitText {
         if (SwingUtilities.getAncestorOfClass(FPMIWindow.class, c) == null) {
             return;
         }
-        FPMI_LC lc = FPMILayout.getLayoutConstraints(c);
+        FPMI_LC lc = constraints(c);
         if (lc == null || lc.getFontRatioX() == null || lc.getFontRatioY() == null
                 || Boolean.TRUE.equals(lc.getDisableFontScale())) {
             return;  // Vision doesn't scale this component's font.
@@ -207,15 +247,33 @@ public final class FitText {
         if (now < state.pausedUntil) {
             return;
         }
-        if (now - state.windowStart > 1000) {
-            state.windowStart = now;
+        String size = w + "x" + h + "|" + text;
+        if (!size.equals(state.size)) {
+            // A new size or text is normal (the window is being resized): not a loop.
+            state.size = size;
             state.fitsInWindow = 0;
-        }
-        if (++state.fitsInWindow > 5) {
-            // Something keeps changing it back (another script, a styles table): leave it alone for a while.
-            state.pausedUntil = now + 5000;
-            LOG.debug("Pausing fits for {}: changed back too often", c.getName());
-            return;
+            state.windowStart = now;
+        } else {
+            if (now - state.windowStart > 1000) {
+                state.windowStart = now;
+                state.fitsInWindow = 0;
+            }
+            if (++state.fitsInWindow > 5) {
+                // Something keeps changing it back at the same size (a script, a styles table): pause, then retry.
+                state.pausedUntil = now + 5000;
+                LOG.debug("Pausing fits for {}: changed back too often", c.getName());
+                javax.swing.Timer retry = new javax.swing.Timer(5100, e -> {
+                    State st = states.get(c);
+                    if (st != null) {
+                        st.key = null;
+                        st.size = null;
+                    }
+                    queue(c);
+                });
+                retry.setRepeats(false);
+                retry.start();
+                return;
+            }
         }
         // Vision's font arithmetic uses the fractional layout bounds, not the whole-pixel size.
         Rectangle2D bounds = FPMILayout.getBounds(c);
@@ -248,6 +306,21 @@ public final class FitText {
                 c.setBorder(ours);
             }
         }
+        if (c instanceof AbstractButton) {
+            AbstractButton b = (AbstractButton) c;
+            if (state.margin == null) {
+                state.margin = b.getMargin();
+            }
+            if (state.margin != null) {
+                double sc = Math.min(1, bh / designHeight);
+                Insets m = state.margin;
+                Insets scaled = new Insets((int) Math.round(m.top * sc), (int) Math.round(m.left * sc),
+                        (int) Math.round(m.bottom * sc), (int) Math.round(m.right * sc));
+                if (!scaled.equals(b.getMargin())) {
+                    b.setMargin(scaled);
+                }
+            }
+        }
         // Vision's size before rounding: the smaller of the width and height ratios (FPMILayout.scaleFont).
         float size = (float) Math.max(MIN_FONT, Math.min(state.ratioX * bw, state.ratioY * bh));
         Insets in = c.getInsets();
@@ -265,6 +338,7 @@ public final class FitText {
         if (frac > 0.48f && frac < 0.52f) {
             size -= 0.03f;
         }
+        Debug.log("fit %s '%s' %dx%d insets %s room %d widthRoom %d size %.2f", c.getClass().getSimpleName(), text, w, h, in, room, widthRoom, size);
         // Vision's next layout pass then computes the same (rounded) size and keeps this font.
         lc.setFontRatioX((float) (size / bw));
         lc.setFontRatioY((float) (size / bh));
@@ -281,6 +355,10 @@ public final class FitText {
             c.setBorder(state.border);
             state.border = null;
         }
+        if (state.margin != null && c instanceof AbstractButton) {
+            ((AbstractButton) c).setMargin(state.margin);
+            state.margin = null;
+        }
         // Vision's next layout pass sets its own rounded font from the restored ratios.
         c.revalidate();
     }
@@ -291,7 +369,8 @@ public final class FitText {
         if (fm.getAscent() + fm.getDescent() > room + 1) {
             return false;
         }
-        return text == null || text.isEmpty() || fm.stringWidth(text) <= widthRoom;
+        // One pixel to spare: Swing measures the text again with rounding and ends it in "..." when it doesn't fit.
+        return text == null || text.isEmpty() || fm.stringWidth(text) <= widthRoom - 1;
     }
 
     private static String text(JComponent c) {
@@ -317,6 +396,47 @@ public final class FitText {
         return icon == null ? 0 : icon.getIconWidth() + gap;
     }
 
+    /** Gives a component Vision's own font and border back and forgets it (its fix was turned off). */
+    static void release(JComponent c) {
+        State state = states.remove(c);
+        if (state == null) {
+            return;
+        }
+        c.removePropertyChangeListener("font", WATCHER);
+        c.removePropertyChangeListener("text", WATCHER);
+        c.removePropertyChangeListener("value", WATCHER);
+        FPMI_LC lc = FPMILayout.getLayoutConstraints(c);
+        applying = true;
+        try {
+            if (lc != null) {
+                restore(c, lc, state);
+            } else if (state.border != null) {
+                c.setBorder(state.border);
+            }
+        } finally {
+            applying = false;
+        }
+    }
+
+    /** A setting changed: apply every fix again, in every client window. */
+    static void refresh() {
+        if (listener == null) {
+            return;
+        }
+        MinimumSize.scanAll();
+        for (Frame f : Frame.getFrames()) {
+            ClientScale.walk(f, c -> {
+                State st = states.get(c);
+                if (st != null) {
+                    st.key = null;
+                }
+                if (c instanceof JTextField || c instanceof JLabel || c instanceof AbstractButton || InnerParts.handles(c)) {
+                    queue(c);
+                }
+            });
+        }
+    }
+
     private static void restoreAll() {
         applying = true;
         try {
@@ -333,6 +453,8 @@ public final class FitText {
             }
             states.clear();
             MinimumSize.restoreAll();
+            ClientScale.restoreAll();
+            InnerParts.restoreAll();
         } finally {
             applying = false;
         }
