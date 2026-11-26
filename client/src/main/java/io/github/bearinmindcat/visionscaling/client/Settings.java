@@ -24,9 +24,9 @@ final class Settings {
     enum Fix {
         ENABLED("enabled", "Turn on Vision Scaling Fix", ""),
         FIELDS("fields", "Value boxes", "numbers fit inside the box"),
-        LABELS("labels", "Labels", "text fits, no more \"...\""),
+        LABELS("labels", "Labels", "text fits, or ends in \"...\" with the rest on hover"),
         BUTTONS("buttons", "Buttons", "text fits on the button"),
-        PARTS("parts", "Tables and tabs", "rows, headers and menu tabs shrink too"),
+        PARTS("parts", "Tables, charts and tabs", "rows, headers, axes and menu tabs shrink too"),
         HOVER("hover", "Read tiny text", "point at it to see it at normal size"),
         DOCKS("docks", "Title bar and menus", "shrink with the window"),
         ANCHORED("anchored", "Header bars and bottom tabs", "shrink with the screen"),

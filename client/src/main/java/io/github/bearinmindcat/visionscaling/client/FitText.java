@@ -69,6 +69,8 @@ public final class FitText {
     private static final Color LINE = new Color(0xB4, 0xB9, 0xBE);
     /** Text drawn smaller than this (points) gets a tooltip showing it at a readable size ("Read tiny text"). */
     private static final float TINY = 7f;
+    /** Labels and buttons don't shrink below this fraction of Vision's own font size; past it they end in "...". */
+    private static final float LABEL_FLOOR = 0.75f;
 
     private static AWTEventListener listener;
     private static final KeyEventDispatcher HOTKEY = e -> {
@@ -345,9 +347,13 @@ public final class FitText {
         int room = c instanceof AbstractButton ? h - 2 : h - in.top - in.bottom;
         int widthRoom = w - in.left - in.right - iconWidth(c);
         Font base = c.getFont();
-        while (size > MIN_FONT && !fits(c, base.deriveFont(size), text, room, widthRoom)) {
+        // Value boxes shrink as far as it takes (a number must show whole); labels and buttons only to 75 % of
+        // Vision's own size, and past that end in "..." as Vision does, with the whole text on hover.
+        float floor = field ? MIN_FONT : Math.max(MIN_FONT, size * LABEL_FLOOR);
+        while (size > floor && !fits(c, base.deriveFont(size), text, room, widthRoom)) {
             size -= STEP;
         }
+        boolean cut = !field && text != null && c.getFontMetrics(base.deriveFont(size)).stringWidth(text) > widthRoom - 1;
         // Off the half-point: Vision rounds ratio x bounds (Math.round) and compares it with the font's whole size
         // ((int) (size + 0.5)); right at x.5 float error could make the two disagree.
         float frac = size - (float) Math.floor(size);
@@ -355,7 +361,7 @@ public final class FitText {
             size -= 0.03f;
         }
         Debug.log("fit %s '%s' %dx%d insets %s room %d widthRoom %d size %.2f", c.getClass().getSimpleName(), text, w, h, in, room, widthRoom, size);
-        tooltip(c, state, size < TINY && Settings.on(Settings.Fix.HOVER) ? text : null);
+        tooltip(c, state, (size < TINY || cut) && Settings.on(Settings.Fix.HOVER) ? text : null);
         // Vision's next layout pass then computes the same (rounded) size and keeps this font.
         lc.setFontRatioX((float) (size / bw));
         lc.setFontRatioY((float) (size / bh));

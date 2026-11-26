@@ -2,6 +2,9 @@ package io.github.bearinmindcat.visionscaling.client;
 
 import com.inductiveautomation.factorypmi.application.VisionDesktop;
 import com.inductiveautomation.factorypmi.application.components.AlarmStatusTable;
+import com.inductiveautomation.factorypmi.application.components.PMIEasyChart;
+import com.inductiveautomation.factorypmi.application.components.PMITable;
+import com.inductiveautomation.factorypmi.application.components.VisionAdvancedTable;
 import com.inductiveautomation.factorypmi.application.components.tabstrip.PMITabStrip;
 import com.inductiveautomation.factorypmi.application.components.util.FPMILayout;
 import com.inductiveautomation.factorypmi.application.components.util.FPMI_LC;
@@ -33,6 +36,35 @@ final class InnerParts {
 
     private static final Map<PMITabStrip, TabState> tabs = new WeakHashMap<>();
     private static final Map<AlarmStatusTable, TableState> tables = new WeakHashMap<>();
+    private static final Map<JComponent, GridState> grids = new WeakHashMap<>();
+    private static final Map<PMIEasyChart, ChartState> charts = new WeakHashMap<>();
+
+    /** A Table or Power Table: row height and header font (Vision's layout scales neither). */
+    private static final class GridState {
+        final int rowHeight;
+        final Font headerFont;
+        double scale = 1;
+
+        GridState(int rowHeight, Font headerFont) {
+            this.rowHeight = rowHeight;
+            this.headerFont = headerFont;
+        }
+    }
+
+    /** An Easy Chart: title and axis fonts, and the pen panel's check boxes and labels. */
+    private static final class ChartState {
+        final Font title;
+        final Font axisLabel;
+        final Font axisTick;
+        final Map<JComponent, Font> inner = new HashMap<>();
+        double scale = 1;
+
+        ChartState(PMIEasyChart c) {
+            title = c.getTitleFont();
+            axisLabel = c.getAxisLabelFont();
+            axisTick = c.getAxisTickLabelFont();
+        }
+    }
     private static boolean busy;
 
     private static final class TabState {
@@ -73,7 +105,8 @@ final class InnerParts {
     }
 
     static boolean handles(JComponent c) {
-        return c instanceof PMITabStrip || c instanceof AlarmStatusTable;
+        return c instanceof PMITabStrip || c instanceof AlarmStatusTable || c instanceof PMITable
+                || c instanceof VisionAdvancedTable || c instanceof PMIEasyChart;
     }
 
     /** How much smaller than its design size the component is drawn (at most 1). */
@@ -104,6 +137,10 @@ final class InnerParts {
                 tab((PMITabStrip) c, s);
             } else if (c instanceof AlarmStatusTable) {
                 table((AlarmStatusTable) c, s);
+            } else if (c instanceof PMIEasyChart) {
+                chart((PMIEasyChart) c, s);
+            } else {
+                grid(c, s);
             }
         } catch (Throwable t) {
             LOG.debug("Could not scale {}", c.getName(), t);
@@ -233,12 +270,116 @@ final class InnerParts {
         t.revalidate();
     }
 
+    private static Font scaled(Font f, double s) {
+        return f == null ? null : f.deriveFont(Math.max(4f, (float) (f.getSize2D() * s)));
+    }
+
+    /** Table (PMITable) or Power Table (VisionAdvancedTable). */
+    private static void grid(JComponent t, double s) {
+        boolean power = t instanceof VisionAdvancedTable;
+        GridState st = grids.get(t);
+        if (s == 1) {
+            if (st != null) {
+                grids.remove(t);
+                if (power) {
+                    ((VisionAdvancedTable) t).setRowHeight(st.rowHeight);
+                    if (st.headerFont != null) {
+                        ((VisionAdvancedTable) t).setHeaderFont(st.headerFont);
+                    }
+                } else {
+                    ((PMITable) t).setRowHeight(st.rowHeight);
+                    if (st.headerFont != null) {
+                        ((PMITable) t).setHeaderFont(st.headerFont);
+                    }
+                }
+                t.revalidate();
+            }
+            return;
+        }
+        if (st == null) {
+            st = power ? new GridState(((VisionAdvancedTable) t).getRowHeight(), ((VisionAdvancedTable) t).getHeaderFont())
+                    : new GridState(((PMITable) t).getRowHeight(), ((PMITable) t).getHeaderFont());
+            grids.put(t, st);
+        }
+        if (Math.abs(st.scale - s) < 0.01) {
+            return;
+        }
+        st.scale = s;
+        int rows = Math.max(6, (int) Math.round(st.rowHeight * s));
+        if (power) {
+            ((VisionAdvancedTable) t).setRowHeight(rows);
+            if (st.headerFont != null) {
+                ((VisionAdvancedTable) t).setHeaderFont(scaled(st.headerFont, s));
+            }
+        } else {
+            ((PMITable) t).setRowHeight(rows);
+            if (st.headerFont != null) {
+                ((PMITable) t).setHeaderFont(scaled(st.headerFont, s));
+            }
+        }
+        t.revalidate();
+    }
+
+    private static void chart(PMIEasyChart c, double s) {
+        ChartState st = charts.get(c);
+        if (s == 1) {
+            if (st != null) {
+                charts.remove(c);
+                if (st.title != null) {
+                    c.setTitleFont(st.title);
+                }
+                if (st.axisLabel != null) {
+                    c.setAxisLabelFont(st.axisLabel);
+                }
+                if (st.axisTick != null) {
+                    c.setAxisTickLabelFont(st.axisTick);
+                }
+                st.inner.forEach(JComponent::setFont);
+                c.revalidate();
+            }
+            return;
+        }
+        if (st == null) {
+            st = new ChartState(c);
+            charts.put(c, st);
+        }
+        if (Math.abs(st.scale - s) < 0.01) {
+            return;
+        }
+        st.scale = s;
+        if (st.title != null) {
+            c.setTitleFont(scaled(st.title, s));
+        }
+        if (st.axisLabel != null) {
+            c.setAxisLabelFont(scaled(st.axisLabel, s));
+        }
+        if (st.axisTick != null) {
+            c.setAxisTickLabelFont(scaled(st.axisTick, s));
+        }
+        // The pen panel beside the plot: check boxes and labels that Vision doesn't lay out.
+        ChartState state = st;
+        ClientScale.walk(c, part -> {
+            if ((part instanceof AbstractButton || part instanceof javax.swing.JLabel) && FitText.constraints(part) == null
+                    && part.getFont() != null) {
+                Font original = state.inner.computeIfAbsent(part, p -> p.getFont());
+                part.setFont(scaled(original, s));
+            }
+        });
+        c.revalidate();
+    }
+
     static void restoreAll() {
         for (PMITabStrip t : new ArrayList<>(tabs.keySet())) {
             tab(t, 1);
         }
         for (AlarmStatusTable t : new ArrayList<>(tables.keySet())) {
             table(t, 1);
+        }
+        for (JComponent t : new ArrayList<>(grids.keySet())) {
+            grid(t, 1);
+        }
+        for (PMIEasyChart c : new ArrayList<>(charts.keySet())) {
+            chart(c, 1);
         }
     }
 }
