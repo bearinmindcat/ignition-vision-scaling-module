@@ -49,9 +49,9 @@ Each fix has its own check box in the settings window (**Ctrl+Period** in a clie
 **Text.** After Vision lays a window out, each component drawn below 97 % of its design height gets:
 
 - **Value boxes:** a 1 px line border whose padding shrinks with the box, in place of the fixed 8 px, and text that fits.
-- **Labels and buttons:** the exact (fractional) font size, shrunk in quarter-point steps until the text fits, instead of ending in "...". A button keeps its look-and-feel border, but the border's padding (6 px a side in Ignition's look and feel) shrinks with the button. HTML text is left alone (it wraps instead).
-- **Tables and tabs:** an alarm status table's rows, header and Acknowledge/Shelve buttons, and a tab strip's tab fonts, padding and spacing, shrink with the component. Vision's own layout leaves these at full size.
-- **Read tiny text:** text that ends up smaller than 7 pt shows at a readable size in a tooltip when the mouse is over it (a tap over Remote Desktop). A component's own tooltip is never replaced.
+- **Labels and buttons:** the exact (fractional) font size, shrunk in quarter-point steps until the text fits, instead of ending in "...". They shrink at most to 75 % of Vision's own size; text that still doesn't fit ends in "..." as in Vision, and shows whole on hover (with **Read tiny text** on). A button keeps its look-and-feel border, but the border's padding (6 px a side in Ignition's look and feel) shrinks with the button. HTML text is left alone (it wraps instead).
+- **Tables, charts and tabs:** Vision's layout leaves these at full size; the module shrinks them with the component while the client is smaller than full screen: an alarm status table's rows, header and Acknowledge/Shelve buttons; a Table's or Power Table's row height and header font; an Easy Chart's title, axis and tick fonts and its pen list and date controls; a tab strip's tab fonts, padding and spacing.
+- **Read tiny text:** text that ends up smaller than 7 pt, or a label cut short with "...", shows at a readable size in a tooltip when the mouse is over it (a tap over Remote Desktop). A component's own tooltip is never replaced.
 
 **Small windows.** While the client is smaller than its screen's full size, it shrinks as one picture:
 
@@ -68,7 +68,7 @@ Vision re-applies its own rounded font on every layout pass whenever the rounded
 
 - **Proportions:** Vision keeps a screen's proportions, so in a tall, narrow window the screen comes out small with blank space above and below. Changing that would stretch or squash the graphics: Vision uses the same layout flags for where a panel goes and how its contents are laid out, and in testing, changing them pulled the contents out of their panels.
 - **Very small windows:** a 1920-wide screen in a quarter of a monitor has text 4 to 6 px tall, too small to read in any program. Use **Read tiny text**, or **Smallest size: Half the screen**.
-- **Trade-off:** labels that Vision ended with "..." now show their whole text, but smaller.
+- **Long labels:** a label whose text needs more than a 25 % smaller font to fit still ends in "..." (the whole text shows on hover).
 
 Java can also zoom the whole client evenly, on a PC that always runs it small: `-Dsun.java2d.uiScale=0.5` makes Java report the screen twice as large, so Vision lays screens out at full size and Java draws them at half size. It works together with this module. In our tests (Vision Client Launcher 1.1.35) the launcher's JVM arguments reached only the launcher itself, not the client it starts; setting `JAVA_TOOL_OPTIONS=-Dsun.java2d.uiScale=0.5` before starting the launcher did reach the client.
 
@@ -97,7 +97,7 @@ An administrator can set a fix for every user of one PC with a Java system prope
 | `-Dvisionscaling.fields=false` | value boxes |
 | `-Dvisionscaling.labels=false` | labels |
 | `-Dvisionscaling.buttons=false` | buttons |
-| `-Dvisionscaling.parts=false` | tables and tabs |
+| `-Dvisionscaling.parts=false` | tables, charts and tabs |
 | `-Dvisionscaling.hover=false` | read tiny text |
 | `-Dvisionscaling.docks=false` | title bar and menus |
 | `-Dvisionscaling.anchored=false` | header bars and bottom tabs |
