@@ -116,6 +116,8 @@ Needs JDK 17 or newer (JDK 25 is too new for Gradle 8.10). After changing the ve
 
 To sign the module, set `ignition.signing.keystoreFile`, `keystorePassword`, `certFile`, `certAlias` and `certPassword` in `~/.gradle/gradle.properties`. The build then also writes `build/Vision-Scaling-Fix.modl`.
 
+Releases: pushing a `vX.Y.Z` tag makes the Release workflow attach the unsigned module. To attach the signed one too, run `scripts/upload-signed.sh vX.Y.Z` on the PC that has the signing keystore (it needs the GitHub CLI signed in).
+
 ## License
 
 [MIT](LICENSE)
