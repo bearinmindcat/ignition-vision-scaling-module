@@ -297,17 +297,33 @@ final class ClientScale {
             if (target.equals(now)) {
                 return false;
             }
+            boolean first = applied == null;
             win.setSize(target);
-            win.setLocation(area.x + Math.max(0, (area.width - target.width) / 2), area.y + Math.max(0, (area.height - target.height) / 2));
+            if (first) {
+                // The first time: centered in the visible area, as Vision centers a popup it opens.
+                win.setLocation(area.x + Math.max(0, (area.width - target.width) / 2), area.y + Math.max(0, (area.height - target.height) / 2));
+            } else {
+                keepInside(win, area);   // where the operator put it, still in view
+            }
             popupApplied.put(win, target);
             return true;
         }
         if (applied != null) {
             popupApplied.remove(win);
             win.setSize(own);
+            keepInside(win, area);
             return true;
         }
         return false;
+    }
+
+    /** Moves a window only as far as needed to keep it inside the area. */
+    private static void keepInside(FPMIWindow win, Rectangle area) {
+        int x = Math.max(area.x, Math.min(win.getX(), area.x + area.width - win.getWidth()));
+        int y = Math.max(area.y, Math.min(win.getY(), area.y + area.height - win.getHeight()));
+        if (x != win.getX() || y != win.getY()) {
+            win.setLocation(x, y);
+        }
     }
 
     /** Back to Vision's own layout everywhere (module removed). */
