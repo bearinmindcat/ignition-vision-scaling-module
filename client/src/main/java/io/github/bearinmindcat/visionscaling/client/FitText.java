@@ -30,6 +30,7 @@ import javax.swing.AbstractButton;
 import javax.swing.Icon;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JSpinner;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.border.Border;
@@ -101,6 +102,8 @@ public final class FitText {
         Border border;           // the border Vision gave a text field, while ours replaces it
         Insets margin;           // a button's own margin, while a scaled one replaces it
         boolean tip;             // the tooltip is ours ("Read tiny text")
+        Border outer;            // a spinner's own frame, while a scaled one replaces it
+        Border editor;           // a spinner's editor panel border, while it has none
         String key;              // width, height, text and font size last fitted
         String size;             // width, height and text of the last fit (loop breaker)
         long windowStart;        // loop breaker: same-size refits counted per second
@@ -210,7 +213,8 @@ public final class FitText {
             InnerParts.fit(c);
             return;
         }
-        boolean field = c instanceof JTextField;
+        // A spinner is a value box with arrows: its number sits in an inner text field.
+        boolean field = c instanceof JTextField || c instanceof JSpinner;
         if (!field && !(c instanceof JLabel) && !(c instanceof AbstractButton)) {
             return;
         }
@@ -299,15 +303,40 @@ public final class FitText {
 
     private static void shrink(JComponent c, FPMI_LC lc, State state, boolean field, String text, int w, int h,
                                double bw, double bh, double designHeight) {
+        JComponent host = host(c);
         if (field) {
             if (state.border == null) {
-                state.border = c.getBorder();
+                state.border = host.getBorder();
             }
             int pad = (int) Math.round(3 * (bh / designHeight));
-            Border ours = new CompoundBorder(new LineBorder(LINE, 1), new EmptyBorder(pad, pad + 1, pad, pad + 1));
-            if (!(c.getBorder() instanceof CompoundBorder && ((CompoundBorder) c.getBorder()).getInsideBorder() instanceof EmptyBorder
-                    && Objects.equals(c.getBorder().getBorderInsets(c), ours.getBorderInsets(c)))) {
-                c.setBorder(ours);
+            if (host == c) {
+                Border ours = new CompoundBorder(new LineBorder(LINE, 1), new EmptyBorder(pad, pad + 1, pad, pad + 1));
+                if (!(c.getBorder() instanceof CompoundBorder && ((CompoundBorder) c.getBorder()).getInsideBorder() instanceof EmptyBorder
+                        && Objects.equals(c.getBorder().getBorderInsets(c), ours.getBorderInsets(c)))) {
+                    c.setBorder(ours);
+                }
+            } else {
+                // A spinner draws its own frame around the text field (8 px of it in Ignition's look and feel). Like a
+                // value box, it gets a 1 px line instead while it is small, and the text field's padding shrinks.
+                if (state.outer == null) {
+                    state.outer = c.getBorder();
+                }
+                if (!(c.getBorder() instanceof LineBorder)) {
+                    c.setBorder(new LineBorder(LINE, 1));
+                }
+                JComponent editor = ((JSpinner) c).getEditor();
+                if (state.editor == null && editor.getBorder() != null && !(editor.getBorder() instanceof EmptyBorder
+                        && editor.getBorder().getBorderInsets(editor).top == 0)) {
+                    state.editor = editor.getBorder();
+                    editor.setBorder(new EmptyBorder(0, 0, 0, 0));
+                }
+                // Lay the spinner out now, so the text field's new size is measured below.
+                c.doLayout();
+                editor.doLayout();
+                Border ours = new EmptyBorder(pad, pad + 1, pad, pad + 1);
+                if (!(host.getBorder() instanceof EmptyBorder && Objects.equals(host.getBorder().getBorderInsets(host), ours.getBorderInsets(host)))) {
+                    host.setBorder(ours);
+                }
             }
         }
         if (c instanceof AbstractButton && (state.border != null || c.getBorder() != null)) {
@@ -341,16 +370,16 @@ public final class FitText {
         }
         // Vision's size before rounding: the smaller of the width and height ratios (FPMILayout.scaleFont).
         float size = (float) Math.max(MIN_FONT, Math.min(state.ratioX * bw, state.ratioY * bh));
-        Insets in = c.getInsets();
+        Insets in = host.getInsets();
         // A button's text is centered and may run over its padding (Vision's own size does), so only keep it
         // inside the button itself; fields and labels keep their text inside their insets.
-        int room = c instanceof AbstractButton ? h - 2 : h - in.top - in.bottom;
-        int widthRoom = w - in.left - in.right - iconWidth(c);
+        int room = c instanceof AbstractButton ? h - 2 : host.getHeight() - in.top - in.bottom;
+        int widthRoom = host.getWidth() - in.left - in.right - iconWidth(c);
         Font base = c.getFont();
         // Value boxes shrink as far as it takes (a number must show whole); labels and buttons only to 75 % of
         // Vision's own size, and past that end in "..." as Vision does, with the whole text on hover.
         float floor = field ? MIN_FONT : Math.max(MIN_FONT, size * LABEL_FLOOR);
-        while (size > floor && !fits(c, base.deriveFont(size), text, room, widthRoom)) {
+        while (size > floor && !fits(host, base.deriveFont(size), text, room, widthRoom)) {
             size -= STEP;
         }
         boolean cut = !field && text != null && c.getFontMetrics(base.deriveFont(size)).stringWidth(text) > widthRoom - 1;
@@ -360,7 +389,7 @@ public final class FitText {
         if (frac > 0.48f && frac < 0.52f) {
             size -= 0.03f;
         }
-        Debug.log("fit %s '%s' %dx%d insets %s room %d widthRoom %d size %.2f", c.getClass().getSimpleName(), text, w, h, in, room, widthRoom, size);
+        Debug.log("fit %s '%s' %dx%d insets %s room %d widthRoom %d size %.2f host %dx%d", c.getClass().getSimpleName(), text, w, h, in, room, widthRoom, size, host.getWidth(), host.getHeight());
         tooltip(c, state, (size < TINY || cut) && Settings.on(Settings.Fix.HOVER) ? text : null);
         // Vision's next layout pass then computes the same (rounded) size and keeps this font.
         lc.setFontRatioX((float) (size / bw));
@@ -368,6 +397,17 @@ public final class FitText {
         if (Math.abs(base.getSize2D() - size) > 0.01f) {
             c.setFont(base.deriveFont(size));
         }
+        if (host != c && (host.getFont() == null || Math.abs(host.getFont().getSize2D() - size) > 0.01f)) {
+            host.setFont(base.deriveFont(size));
+        }
+    }
+
+    /** The component that holds the text and its padding: a spinner's inner text field, else the component itself. */
+    static JComponent host(JComponent c) {
+        if (c instanceof JSpinner && ((JSpinner) c).getEditor() instanceof JSpinner.DefaultEditor) {
+            return ((JSpinner.DefaultEditor) ((JSpinner) c).getEditor()).getTextField();
+        }
+        return c;
     }
 
     /** Back to Vision's own look: its ratios, its border and its rounded font size for the current box. */
@@ -375,8 +415,16 @@ public final class FitText {
         lc.setFontRatioX(state.ratioX);
         lc.setFontRatioY(state.ratioY);
         if (state.border != null) {
-            c.setBorder(state.border);
+            host(c).setBorder(state.border);
             state.border = null;
+        }
+        if (state.outer != null) {
+            c.setBorder(state.outer);
+            state.outer = null;
+        }
+        if (state.editor != null && c instanceof JSpinner) {
+            ((JSpinner) c).getEditor().setBorder(state.editor);
+            state.editor = null;
         }
         if (state.margin != null && c instanceof AbstractButton) {
             ((AbstractButton) c).setMargin(state.margin);
@@ -390,6 +438,9 @@ public final class FitText {
             int size = Math.max(2, Math.min(Math.round(state.ratioX * (float) b.getWidth()), Math.round(state.ratioY * (float) b.getHeight())));
             if (Math.abs(c.getFont().getSize2D() - size) > 0.01f) {
                 c.setFont(c.getFont().deriveFont((float) size));
+            }
+            if (host(c) != c) {
+                host(c).setFont(c.getFont());
             }
         }
         c.revalidate();
@@ -465,6 +516,10 @@ public final class FitText {
         if (c instanceof JTextField) {
             return ((JTextField) c).getText();
         }
+        if (c instanceof JSpinner) {
+            JComponent host = host(c);
+            return host instanceof JTextField ? ((JTextField) host).getText() : "";
+        }
         if (c instanceof JLabel) {
             return ((JLabel) c).getText();
         }
@@ -499,7 +554,7 @@ public final class FitText {
             if (lc != null) {
                 restore(c, lc, state);
             } else if (state.border != null) {
-                c.setBorder(state.border);
+                host(c).setBorder(state.border);
             }
         } finally {
             applying = false;
@@ -518,7 +573,7 @@ public final class FitText {
                 if (st != null) {
                     st.key = null;
                 }
-                if (c instanceof JTextField || c instanceof JLabel || c instanceof AbstractButton || InnerParts.handles(c)) {
+                if (c instanceof JTextField || c instanceof JSpinner || c instanceof JLabel || c instanceof AbstractButton || InnerParts.handles(c)) {
                     queue(c);
                 }
             });
